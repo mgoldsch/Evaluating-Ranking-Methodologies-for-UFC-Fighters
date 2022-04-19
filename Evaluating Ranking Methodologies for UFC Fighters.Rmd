@@ -12,6 +12,135 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Libraries
 
 ```{r}
+library(elo)
+library(foreach)
+library(doSNOW)
+```
 
+## Load Data
+
+```{r}
+ufc_data <- read.csv("data.csv")[, c("R_fighter", "B_fighter", "date", "Winner")]
+```
+
+## Data Prep
+
+```{r}
+#exclude ties
+ufc_data$R_win <- 0
+ufc_data$R_win[which(ufc_data$Winner == "Red")] <- 1
+ufc_data$R_win[which(ufc_data$Winner == "Draw")] <- .5
+
+ufc_data$B_win <- 0
+ufc_data$B_win[which(ufc_data$Winner == "Blue")] <- 1
+ufc_data$B_win[which(ufc_data$Winner == "Draw")] <- .5
+
+ufc_data$date <- as.Date(ufc_data$date)
+
+ufc_data <- ufc_data[order(ufc_data$date), ]
+
+ufc_data$R_elo_before <- NA
+ufc_data$B_elo_before <- NA
+
+ufc_data$R_elo_after <- NA
+ufc_data$B_elo_after <- NA
+```
+
+## Elo
+
+```{r}
+#Elo generation
+fighters <- unique(c(ufc_data$R_fighter, ufc_data$B_fighter))
+fighter_elo <- data.frame(fighter = fighters, elo = 1500)
+
+k_list <- seq(0, 1000, 20)
+
+cluster <- makeCluster(detectCores() -1)
+registerDoSNOW(cluster)
+
+iterations <- length(k_list)
+pb <- txtProgressBar(max = iterations, style = 3)
+progress <- function(n) setTxtProgressBar(pb, n)
+opts <- list(progress = progress)
+
+elo_performance_df <- foreach(i =  1:length(k_list), .combine = 'rbind', .packages = 'elo', .export = c("ufc_data", "fighter_elo"), .options.snow = opts) %dopar% {
+  fighter_elo_loop <- fighter_elo
+  ufc_data_loop <- ufc_data
+  for(j in 1:nrow(ufc_data_loop)) {
+    elo_before_r <- fighter_elo_loop[which(fighter_elo_loop$fighter == ufc_data_loop[j,]$R_fighter),]$elo
+    elo_before_b <- fighter_elo_loop[which(fighter_elo_loop$fighter == ufc_data_loop[j,]$B_fighter),]$elo
+    
+    ufc_data_loop[j,]$R_elo_before <- elo_before_r
+    ufc_data_loop[j,]$B_elo_before <- elo_before_b
+    
+    new_elo <- elo.calc(
+      wins.A = ufc_data_loop[j,]$R_win,
+      elo.A = elo_before_r,
+      elo.B = elo_before_b,
+      k = k_list[i]
+    )
+    
+    fighter_elo_loop[which(fighter_elo_loop$fighter == ufc_data_loop[j,]$R_fighter),]$elo <- new_elo[1, 1]
+    fighter_elo_loop[which(fighter_elo_loop$fighter == ufc_data_loop[j,]$B_fighter),]$elo <- new_elo[1, 2]
+    
+    ufc_data_loop[j,]$R_elo_after <- new_elo[1, 1]
+    ufc_data_loop[j,]$B_elo_after <- new_elo[1, 2]
+  }
+  
+  # Elo Performance
+  ufc_data_loop$elo_predict_winner <- NA
+  ufc_data_loop$elo_predict_winner[ufc_data_loop$R_elo_before > ufc_data_loop$B_elo_before] <-  "Red"
+  ufc_data_loop$elo_predict_winner[ufc_data_loop$B_elo_before > ufc_data_loop$R_elo_before] <- "Blue"
+  ufc_data_loop$elo_predict_winner[ufc_data_loop$R_elo_before == ufc_data_loop$B_elo_before] <- "Draw"
+  
+  ufc_data_loop$elo_prediction_accurate <- NA
+  ufc_data_loop$elo_prediction_accurate[ufc_data_loop$elo_predict_winner == ufc_data_loop$Winner] <- 1
+  ufc_data_loop$elo_prediction_accurate[ufc_data_loop$elo_predict_winner != ufc_data_loop$Winner] <- 0
+  
+  cbind(method = "elo" , k = k_list[i], accuracy = mean(ufc_data_loop$elo_prediction_accurate))
+}
+
+close(pb)
+stopCluster(cluster)
+
+elo_performance_df <- as.data.frame(elo_performance_df)
+```
+
+```{r}
+for(j in 1:nrow(ufc_data)) {
+    elo_before_r <- fighter_elo[which(fighter_elo$fighter == ufc_data[j,]$R_fighter),]$elo
+    elo_before_b <- fighter_elo[which(fighter_elo$fighter == ufc_data[j,]$B_fighter),]$elo
+    
+    ufc_data[j,]$R_elo_before <- elo_before_r
+    ufc_data[j,]$B_elo_before <- elo_before_b
+    
+    new_elo <- elo.calc(
+      wins.A = ufc_data[j,]$R_win,
+      elo.A = elo_before_r,
+      elo.B = elo_before_b,
+      k = 200
+    )
+    
+    fighter_elo[which(fighter_elo$fighter == ufc_data[j,]$R_fighter),]$elo <- new_elo[1, 1]
+    fighter_elo[which(fighter_elo$fighter == ufc_data[j,]$B_fighter),]$elo <- new_elo[1, 2]
+    
+    ufc_data[j,]$R_elo_after <- new_elo[1, 1]
+    ufc_data[j,]$B_elo_after <- new_elo[1, 2]
+  }
+```
+
+```{r}
+# Elo Performance
+ufc_data$elo_predict_winner <- NA
+ufc_data$elo_predict_winner[ufc_data$R_elo_before > ufc_data$B_elo_before] <-  "Red"
+ufc_data$elo_predict_winner[ufc_data$B_elo_before > ufc_data$R_elo_before] <- "Blue"
+ufc_data$elo_predict_winner[ufc_data$R_elo_before == ufc_data$B_elo_before] <- "Draw"
+
+ufc_data$elo_prediction_accurate <- NA
+ufc_data$elo_prediction_accurate[ufc_data$elo_predict_winner == ufc_data$Winner] <- 1
+ufc_data$elo_prediction_accurate[ufc_data$elo_predict_winner != ufc_data$Winner] <- 0
+
+elo_performance_df <- cbind(method = "elo" , k = 100, accuracy = mean(ufc_data$elo_prediction_accurate))
+elo_performance_df
 ```
 
