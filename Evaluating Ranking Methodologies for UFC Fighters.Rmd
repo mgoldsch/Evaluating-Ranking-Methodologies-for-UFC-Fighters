@@ -1,0 +1,17 @@
+---
+title: "Evaluating Ranking Methodologies for UFC Fighters"
+author: "Michael Goldschlager"
+date: "4/19/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Libraries
+
+```{r}
+
+```
+
