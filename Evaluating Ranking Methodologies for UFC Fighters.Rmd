@@ -13,6 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(elo)
+library(PlayerRatings)
 library(foreach)
 library(doSNOW)
 ```
@@ -26,7 +27,6 @@ ufc_data <- read.csv("data.csv")[, c("R_fighter", "B_fighter", "date", "Winner")
 ## Data Prep
 
 ```{r}
-#exclude ties
 ufc_data$R_win <- 0
 ufc_data$R_win[which(ufc_data$Winner == "Red")] <- 1
 ufc_data$R_win[which(ufc_data$Winner == "Draw")] <- .5
@@ -53,7 +53,7 @@ ufc_data$B_elo_after <- NA
 fighters <- unique(c(ufc_data$R_fighter, ufc_data$B_fighter))
 fighter_elo <- data.frame(fighter = fighters, elo = 1500)
 
-k_list <- seq(0, 1000, 20)
+k_list <- seq(170, 250, 5)
 
 cluster <- makeCluster(detectCores() -1)
 registerDoSNOW(cluster)
@@ -105,42 +105,106 @@ stopCluster(cluster)
 
 elo_performance_df <- as.data.frame(elo_performance_df)
 ```
+k = 175, best
+
+## Glicko
 
 ```{r}
-for(j in 1:nrow(ufc_data)) {
-    elo_before_r <- fighter_elo[which(fighter_elo$fighter == ufc_data[j,]$R_fighter),]$elo
-    elo_before_b <- fighter_elo[which(fighter_elo$fighter == ufc_data[j,]$B_fighter),]$elo
+#fighters <- unique(c(ufc_data$R_fighter, ufc_data$B_fighter))
+
+rd_init_vals <- seq(30, 150, 10)
+cval_vals <- seq(0, 10, 1)
+glicko_params <- expand.grid(rd = rd_init_vals, cval = cval_vals)
+
+cluster <- makeCluster(detectCores() -1)
+registerDoSNOW(cluster)
+
+iterations <- nrow(glicko_params)
+pb <- txtProgressBar(max = iterations, style = 3)
+progress <- function(n) setTxtProgressBar(pb, n)
+opts <- list(progress = progress)
+
+glicko_performance <- foreach(i = 1:nrow(glicko_params), .combine = 'rbind', .packages = 'PlayerRatings', .options.snow = opts) %dopar% {
+  
+  status_df <- NULL
+  glicko_rating <- NULL
+  #fighter_glicko_loop <- data.frame(fighter = fighters, glicko = 1500, glicko_deviation = glicko_params[i, ]$rd)
+  ufc_data_loop <- ufc_data
+  ufc_data_loop$R_glicko_pred_win_prob <- NA
+  
+  for(j in 1:nrow(ufc_data_loop)){
+    # #before match ratings
+    # ufc_data_loop[j,]$R_glicko_before <- fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko
+    # ufc_data_loop[j,]$B_glicko_before <- fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko
+    # 
+    # ufc_data_loop[j,]$R_glicko_deviation_before <-
+    #   fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko_deviation
+    # 
+    # ufc_data_loop[j,]$B_glicko_deviation_before <- 
+    #   fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko_deviation
     
-    ufc_data[j,]$R_elo_before <- elo_before_r
-    ufc_data[j,]$B_elo_before <- elo_before_b
+    #fight
+    fight <- ufc_data_loop[j, c("date", "R_fighter", "B_fighter", "R_win")]
+    fight$date <- as.numeric(fight$date)
     
-    new_elo <- elo.calc(
-      wins.A = ufc_data[j,]$R_win,
-      elo.A = elo_before_r,
-      elo.B = elo_before_b,
-      k = 200
-    )
+    #rating prediction
+    if(!is.null(glicko_rating)){
+      ufc_data_loop[j, ]$R_glicko_pred_win_prob <- predict(glicko_rating, fight[, -4], tng = 1, trat = c(1500, glicko_params[i, ]$rd))
+    }
     
-    fighter_elo[which(fighter_elo$fighter == ufc_data[j,]$R_fighter),]$elo <- new_elo[1, 1]
-    fighter_elo[which(fighter_elo$fighter == ufc_data[j,]$B_fighter),]$elo <- new_elo[1, 2]
+    #rating generation
+    gl <- glicko(fight, status = status_df, init = c(1500, glicko_params[i, ]$rd), cval = glicko_params[i, ]$cval)
     
-    ufc_data[j,]$R_elo_after <- new_elo[1, 1]
-    ufc_data[j,]$B_elo_after <- new_elo[1, 2]
+    #glicko_rating for future predictions
+    glicko_rating <- gl
+    
+    #status for future input
+    status_df <- gl$ratings
+    
+    # #update fighter rating df
+    # fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko <- 
+    #   status_df[which(status_df$Player == ufc_data_loop[j,]$R_fighter), ]$Rating
+    # 
+    # fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko <- 
+    #   status_df[which(status_df$Player == ufc_data_loop[j,]$B_fighter), ]$Rating
+    # 
+    # fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko_deviation <- 
+    #   status_df[which(status_df$Player == ufc_data_loop[j,]$R_fighter), ]$Deviation
+    # 
+    # fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko_deviation <- 
+    #   status_df[which(status_df$Player == ufc_data_loop[j,]$B_fighter), ]$Deviation
+    
+    # #after match ratings
+    # ufc_data_loop[j,]$R_glicko_after <- fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko
+    # ufc_data_loop[j,]$B_glicko_after <- fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko
+    # 
+    # ufc_data_loop[j,]$R_glicko_deviation_after <-
+    #   fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko_deviation
+    # 
+    # ufc_data_loop[j,]$B_glicko_deviation_after <- 
+    #   fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko_deviation
   }
+  
+  #Glicko Performance
+  ufc_data_loop$glicko_predict_winner <- NA
+  ufc_data_loop$glicko_predict_winner[ufc_data_loop$R_glicko_pred_win_prob > .5] <-  "Red"
+  ufc_data_loop$glicko_predict_winner[ufc_data_loop$R_glicko_pred_win_prob < .5] <- "Blue"
+  ufc_data_loop$glicko_predict_winner[ufc_data_loop$R_glicko_pred_win_prob == .5] <- "Draw"
+
+  ufc_data_loop$glicko_prediction_accurate <- NA
+  ufc_data_loop$glicko_prediction_accurate[ufc_data_loop$glicko_predict_winner == ufc_data_loop$Winner] <- 1
+  ufc_data_loop$glicko_prediction_accurate[ufc_data_loop$glicko_predict_winner != ufc_data_loop$Winner] <- 0
+
+  cbind(method = "glicko" ,
+        rd = glicko_params[i, ]$rd,
+        cval = glicko_params[i, ]$cval,
+        accuracy = mean(ufc_data_loop$glicko_prediction_accurate, na.rm = TRUE))
+}
+
+close(pb)
+stopCluster(cluster)
+
+glicko_performance
 ```
 
-```{r}
-# Elo Performance
-ufc_data$elo_predict_winner <- NA
-ufc_data$elo_predict_winner[ufc_data$R_elo_before > ufc_data$B_elo_before] <-  "Red"
-ufc_data$elo_predict_winner[ufc_data$B_elo_before > ufc_data$R_elo_before] <- "Blue"
-ufc_data$elo_predict_winner[ufc_data$R_elo_before == ufc_data$B_elo_before] <- "Draw"
-
-ufc_data$elo_prediction_accurate <- NA
-ufc_data$elo_prediction_accurate[ufc_data$elo_predict_winner == ufc_data$Winner] <- 1
-ufc_data$elo_prediction_accurate[ufc_data$elo_predict_winner != ufc_data$Winner] <- 0
-
-elo_performance_df <- cbind(method = "elo" , k = 100, accuracy = mean(ufc_data$elo_prediction_accurate))
-elo_performance_df
-```
-
+best is rd 30, cval 0- 66% accuracy
