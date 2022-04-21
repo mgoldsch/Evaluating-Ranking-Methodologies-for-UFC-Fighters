@@ -16,6 +16,7 @@ library(elo)
 library(PlayerRatings)
 library(foreach)
 library(doSNOW)
+library(parallel)
 ```
 
 ## Load Data
@@ -36,6 +37,7 @@ ufc_data$B_win[which(ufc_data$Winner == "Blue")] <- 1
 ufc_data$B_win[which(ufc_data$Winner == "Draw")] <- .5
 
 ufc_data$date <- as.Date(ufc_data$date)
+ufc_data$date_numeric <- as.numeric(ufc_data$date)
 
 ufc_data <- ufc_data[order(ufc_data$date), ]
 
@@ -204,7 +206,29 @@ glicko_performance <- foreach(i = 1:nrow(glicko_params), .combine = 'rbind', .pa
 close(pb)
 stopCluster(cluster)
 
-glicko_performance
+as.data.frame(glicko_performance)
 ```
 
 best is rd 30, cval 0- 66% accuracy
+
+```{python}
+from whr import whole_history_rating
+import pandas as pd
+import numpy as np
+
+ufc_data_py = pd.DataFrame(r.ufc_data)
+ufc_data_py = ufc_data_py[["R_fighter", "B_fighter", "Winner", "date_numeric"]]
+#drop draws
+ufc_data_py = ufc_data_py[ufc_data_py["Winner"] != "Draw"]
+ufc_data_py["Winner_WHR"] = np.where(ufc_data_py["Winner"] == "Red", "B", "W")
+
+whr = whole_history_rating.Base({'w2':14})
+
+for index, fight in ufc_data_py.iterrows():
+  whr.create_game(fight["R_fighter"], fight["B_fighter"], fight["Winner_WHR"], fight["date_numeric"], 0)
+
+whr.auto_iterate(time_limit = 10 precision = 10E-3)
+
+
+```
+
