@@ -112,10 +112,8 @@ k = 175, best
 ## Glicko
 
 ```{r}
-#fighters <- unique(c(ufc_data$R_fighter, ufc_data$B_fighter))
-
 rd_init_vals <- seq(30, 150, 10)
-cval_vals <- seq(0, 10, 1)
+cval_vals <- c(1/2, 1/200, 1/20, 1/10, 1/5)#seq(0, 10, 1)#seems cval doesn't really matter
 glicko_params <- expand.grid(rd = rd_init_vals, cval = cval_vals)
 
 cluster <- makeCluster(detectCores() -1)
@@ -130,21 +128,10 @@ glicko_performance <- foreach(i = 1:nrow(glicko_params), .combine = 'rbind', .pa
   
   status_df <- NULL
   glicko_rating <- NULL
-  #fighter_glicko_loop <- data.frame(fighter = fighters, glicko = 1500, glicko_deviation = glicko_params[i, ]$rd)
   ufc_data_loop <- ufc_data
   ufc_data_loop$R_glicko_pred_win_prob <- NA
   
   for(j in 1:nrow(ufc_data_loop)){
-    # #before match ratings
-    # ufc_data_loop[j,]$R_glicko_before <- fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko
-    # ufc_data_loop[j,]$B_glicko_before <- fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko
-    # 
-    # ufc_data_loop[j,]$R_glicko_deviation_before <-
-    #   fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko_deviation
-    # 
-    # ufc_data_loop[j,]$B_glicko_deviation_before <- 
-    #   fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko_deviation
-    
     #fight
     fight <- ufc_data_loop[j, c("date", "R_fighter", "B_fighter", "R_win")]
     fight$date <- as.numeric(fight$date)
@@ -162,29 +149,6 @@ glicko_performance <- foreach(i = 1:nrow(glicko_params), .combine = 'rbind', .pa
     
     #status for future input
     status_df <- gl$ratings
-    
-    # #update fighter rating df
-    # fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko <- 
-    #   status_df[which(status_df$Player == ufc_data_loop[j,]$R_fighter), ]$Rating
-    # 
-    # fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko <- 
-    #   status_df[which(status_df$Player == ufc_data_loop[j,]$B_fighter), ]$Rating
-    # 
-    # fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko_deviation <- 
-    #   status_df[which(status_df$Player == ufc_data_loop[j,]$R_fighter), ]$Deviation
-    # 
-    # fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko_deviation <- 
-    #   status_df[which(status_df$Player == ufc_data_loop[j,]$B_fighter), ]$Deviation
-    
-    # #after match ratings
-    # ufc_data_loop[j,]$R_glicko_after <- fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko
-    # ufc_data_loop[j,]$B_glicko_after <- fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko
-    # 
-    # ufc_data_loop[j,]$R_glicko_deviation_after <-
-    #   fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$R_fighter),]$glicko_deviation
-    # 
-    # ufc_data_loop[j,]$B_glicko_deviation_after <- 
-    #   fighter_glicko_loop[which(fighter_glicko_loop$fighter == ufc_data_loop[j,]$B_fighter),]$glicko_deviation
   }
   
   #Glicko Performance
