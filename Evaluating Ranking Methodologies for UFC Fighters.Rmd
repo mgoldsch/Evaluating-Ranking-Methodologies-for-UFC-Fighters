@@ -112,8 +112,8 @@ k = 175, best
 ## Glicko
 
 ```{r}
-rd_init_vals <- seq(30, 150, 10)
-cval_vals <- c(1/2, 1/200, 1/20, 1/10, 1/5)#seq(0, 10, 1)#seems cval doesn't really matter
+rd_init_vals <- seq(30, 300, 10)
+cval_vals <- seq(0, 30, 1)#c(1/2, 1/200, 1/20, 1/10, 1/5)#seq(0, 10, 1)#seems cval doesn't really matter
 glicko_params <- expand.grid(rd = rd_init_vals, cval = cval_vals)
 
 cluster <- makeCluster(detectCores() -1)
@@ -130,6 +130,7 @@ glicko_performance <- foreach(i = 1:nrow(glicko_params), .combine = 'rbind', .pa
   glicko_rating <- NULL
   ufc_data_loop <- ufc_data
   ufc_data_loop$R_glicko_pred_win_prob <- NA
+  ufc_data_loop$B_glicko_pred_win_prob <- NA
   
   for(j in 1:nrow(ufc_data_loop)){
     #fight
@@ -139,6 +140,7 @@ glicko_performance <- foreach(i = 1:nrow(glicko_params), .combine = 'rbind', .pa
     #rating prediction
     if(!is.null(glicko_rating)){
       ufc_data_loop[j, ]$R_glicko_pred_win_prob <- predict(glicko_rating, fight[, -4], tng = 1, trat = c(1500, glicko_params[i, ]$rd))
+      ufc_data_loop[j, ]$B_glicko_pred_win_prob <- predict(glicko_rating, fight[, c(1,3,2)], tng = 1, trat = c(1500, 30))
     }
     
     #rating generation
@@ -153,9 +155,9 @@ glicko_performance <- foreach(i = 1:nrow(glicko_params), .combine = 'rbind', .pa
   
   #Glicko Performance
   ufc_data_loop$glicko_predict_winner <- NA
-  ufc_data_loop$glicko_predict_winner[ufc_data_loop$R_glicko_pred_win_prob > .5] <-  "Red"
-  ufc_data_loop$glicko_predict_winner[ufc_data_loop$R_glicko_pred_win_prob < .5] <- "Blue"
-  ufc_data_loop$glicko_predict_winner[ufc_data_loop$R_glicko_pred_win_prob == .5] <- "Draw"
+  ufc_data_loop$glicko_predict_winner[ufc_data_loop$R_glicko_pred_win_prob > ufc_data_loop$B_glicko_pred_win_prob] <-  "Red"
+  ufc_data_loop$glicko_predict_winner[ufc_data_loop$R_glicko_pred_win_prob < ufc_data_loop$B_glicko_pred_win_prob] <- "Blue"
+  ufc_data_loop$glicko_predict_winner[ufc_data_loop$R_glicko_pred_win_prob == ufc_data_loop$B_glicko_pred_win_prob] <- "Draw"
 
   ufc_data_loop$glicko_prediction_accurate <- NA
   ufc_data_loop$glicko_prediction_accurate[ufc_data_loop$glicko_predict_winner == ufc_data_loop$Winner] <- 1
@@ -172,8 +174,65 @@ stopCluster(cluster)
 
 as.data.frame(glicko_performance)
 ```
+rd = 290, cval = 5 best performance- 54.2%
 
-best is rd 30, cval 0- 66% accuracy
+## Best Glicko
+```{r}
+ufc_data_glicko_best <- ufc_data[, c(1:7)]
+status_df <- NULL
+glicko_rating <- NULL
+ufc_data_glicko_best$R_glicko_pred_win_prob <- NA
+ufc_data_glicko_best$B_glicko_pred_win_prob <- NA
+
+
+for(j in 1:nrow(ufc_data_glicko_best)){
+    #fight
+    fight <- ufc_data_glicko_best[j, c("date", "R_fighter", "B_fighter", "R_win")]
+    fight$date <- as.numeric(fight$date)
+    
+    #rating prediction
+    if(!is.null(glicko_rating)){
+      ufc_data_glicko_best[j, ]$R_glicko_pred_win_prob <- predict(glicko_rating, fight[, -4], tng = 1, trat = c(1500, 290))
+      ufc_data_glicko_best[j, ]$B_glicko_pred_win_prob <- predict(glicko_rating, fight[, c(1,3,2)], tng = 1, trat = c(1500, 290))
+    }
+    
+    #rating generation
+    gl <- glicko(fight, status = status_df, init = c(1500, 290), cval = 5)
+    
+    #glicko_rating for future predictions
+    glicko_rating <- gl
+    
+    #status for future input
+    status_df <- gl$ratings
+  }
+  
+#Glicko Performance
+ufc_data_glicko_best$glicko_predict_winner <- NA
+ufc_data_glicko_best$glicko_predict_winner[ufc_data_glicko_best$R_glicko_pred_win_prob > ufc_data_glicko_best$B_glicko_pred_win_prob] <-  "Red"
+ufc_data_glicko_best$glicko_predict_winner[ufc_data_glicko_best$R_glicko_pred_win_prob < ufc_data_glicko_best$B_glicko_pred_win_prob] <- "Blue"
+ufc_data_glicko_best$glicko_predict_winner[ufc_data_glicko_best$R_glicko_pred_win_prob == ufc_data_glicko_best$B_glicko_pred_win_prob] <- "Draw"
+ufc_data_glicko_best$glicko_prediction_accurate <- NA
+ufc_data_glicko_best$glicko_prediction_accurate[ufc_data_glicko_best$glicko_predict_winner == ufc_data_glicko_best$Winner] <- 1
+ufc_data_glicko_best$glicko_prediction_accurate[ufc_data_glicko_best$glicko_predict_winner != ufc_data_glicko_best$Winner] <- 0
+
+View(ufc_data_glicko_best)
+```
+
+## Prediction Accuracy w/ Win Probability Difference
+```{r}
+glicko_performance_win_diff <- data.frame()
+win_diffs <- seq(0, 1, .05)
+for(win_diff in win_diffs){
+  loop_row <- cbind(win_diff, 
+                    nrow(ufc_data_glicko_best[abs(ufc_data_glicko_best$R_glicko_pred_win_prob - ufc_data_glicko_best$B_glicko_pred_win_prob) > win_diff, ]), 
+                    mean(ufc_data_glicko_best[abs(ufc_data_glicko_best$R_glicko_pred_win_prob - ufc_data_glicko_best$B_glicko_pred_win_prob) > win_diff, "glicko_prediction_accurate"], na.rm = TRUE))
+  
+  glicko_performance_win_diff <- rbind(glicko_performance_win_diff, loop_row)
+}
+colnames(glicko_performance_win_diff) <- c("> Abs(Win Probabilty Difference)", "Number of Fights", "Prediction Accuracy") 
+glicko_performance_win_diff
+```
+
 
 ```{python}
 from whr import whole_history_rating
