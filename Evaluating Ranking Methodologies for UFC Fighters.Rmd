@@ -224,12 +224,12 @@ glicko_performance_win_diff <- data.frame()
 win_diffs <- seq(0, 1, .05)
 for(win_diff in win_diffs){
   loop_row <- cbind(win_diff, 
-                    nrow(ufc_data_glicko_best[abs(ufc_data_glicko_best$R_glicko_pred_win_prob - ufc_data_glicko_best$B_glicko_pred_win_prob) > win_diff, ]), 
-                    mean(ufc_data_glicko_best[abs(ufc_data_glicko_best$R_glicko_pred_win_prob - ufc_data_glicko_best$B_glicko_pred_win_prob) > win_diff, "glicko_prediction_accurate"], na.rm = TRUE))
+                    nrow(ufc_data_glicko_best[abs(ufc_data_glicko_best$R_glicko_pred_win_prob - ufc_data_glicko_best$B_glicko_pred_win_prob) >= win_diff, ]), 
+                    mean(ufc_data_glicko_best[abs(ufc_data_glicko_best$R_glicko_pred_win_prob - ufc_data_glicko_best$B_glicko_pred_win_prob) >= win_diff, "glicko_prediction_accurate"], na.rm = TRUE))
   
   glicko_performance_win_diff <- rbind(glicko_performance_win_diff, loop_row)
 }
-colnames(glicko_performance_win_diff) <- c("> Abs(Win Probabilty Difference)", "Number of Fights", "Prediction Accuracy") 
+colnames(glicko_performance_win_diff) <- c(">= Abs(Win Probabilty Difference)", "Number of Fights", "Prediction Accuracy") 
 glicko_performance_win_diff
 ```
 
